@@ -1,0 +1,7 @@
+{
+  "timestamp": "20251028_110128",
+  "model_type": "LightGBM",
+  "accuracy": 0.8076923076923077,
+  "f1_weighted": 0.810988551582197,
+  "feature_count": 48
+}
