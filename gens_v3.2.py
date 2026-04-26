@@ -24,8 +24,6 @@ os.environ["JOBLIB_MULTIPROCESSING"] = "0"
 
 warnings.filterwarnings('ignore')
 
-
-# ==================== 设置随机种子 ====================
 def set_seed(seed=42):
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -35,88 +33,63 @@ def set_seed(seed=42):
 
 set_seed(42)
 
-
-# ==================== 数据加载和预处理 ====================
 def load_and_preprocess_data(csv_path):
-    """加载CSV并进行预处理"""
     df = pd.read_csv(csv_path)
-    print(f"原始数据集大小: {df.shape}")
-    print(f"列名: {df.columns.tolist()}\n")
 
-    # 删除conductivity列和非数值列
     cols_to_drop = []
     if 'conductivity' in df.columns:
         cols_to_drop.append('conductivity')
 
-    # 找出非数值列(除了目标列conductivity_class)
     for col in df.columns:
         if col != 'conductivity_class' and col not in cols_to_drop:
             if df[col].dtype == 'object':
                 cols_to_drop.append(col)
 
     if cols_to_drop:
-        print(f"删除列: {cols_to_drop}")
         df = df.drop(columns=cols_to_drop)
 
-    # 检查目标列
     if 'conductivity_class' not in df.columns:
-        raise ValueError("未找到目标列 'conductivity_class'")
+        raise ValueError("cannot find 'conductivity_class'")
 
-    # 分离特征和标签
     y = df['conductivity_class'].values
     X = df.drop(columns=['conductivity_class']).values
 
-    # 编码标签
+
     le = LabelEncoder()
     y_encoded = le.fit_transform(y)
 
-    print(f"特征数量: {X.shape[1]}")
-    print(f"类别: {le.classes_}")
-    print(f"类别分布: {np.bincount(y_encoded)}\n")
-
     return X, y_encoded, le, df.drop(columns=['conductivity_class']).columns.tolist()
 
-
-# ==================== 保存数据集 ====================
 def save_datasets(X_work, y_work, X_test, y_test, X_augmented, y_augmented,
                   label_encoder, feature_names, output_dir="dataset_output"):
-    """
-    保存划分好的数据集到指定文件夹
-    """
-    # 创建输出目录 [1,3](@ref)
+
     if not os.path.exists(output_dir):
         os.makedirs(output_dir, exist_ok=True)
 
-    # 获取当前时间戳用于文件名
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    # 将标签转换回原始标签
     y_work_original = label_encoder.inverse_transform(y_work)
     y_test_original = label_encoder.inverse_transform(y_test)
     y_augmented_original = label_encoder.inverse_transform(y_augmented)
 
-    # 创建DataFrame并保存测试集
+
     test_df = pd.DataFrame(X_test, columns=feature_names)
     test_df['conductivity_class'] = y_test_original
     test_file = os.path.join(output_dir, f"test_set_{timestamp}.csv")
     test_df.to_csv(test_file, index=False)
-    print(f"测试集已保存: {test_file} (样本数: {len(test_df)})")
 
-    # 创建DataFrame并保存原始工作集
     work_df = pd.DataFrame(X_work, columns=feature_names)
     work_df['conductivity_class'] = y_work_original
     work_file = os.path.join(output_dir, f"original_work_set_{timestamp}.csv")
     work_df.to_csv(work_file, index=False)
-    print(f"原始工作集已保存: {work_file} (样本数: {len(work_df)})")
 
-    # 创建DataFrame并保存增强后的工作集
+
+
     augmented_df = pd.DataFrame(X_augmented, columns=feature_names)
     augmented_df['conductivity_class'] = y_augmented_original
     augmented_file = os.path.join(output_dir, f"augmented_work_set_{timestamp}.csv")
     augmented_df.to_csv(augmented_file, index=False)
-    print(f"增强工作集已保存: {augmented_file} (样本数: {len(augmented_df)})")
 
-    # 保存元数据信息
     metadata = {
         "timestamp": timestamp,
         "test_set_size": int(len(test_df)),
@@ -134,20 +107,13 @@ def save_datasets(X_work, y_work, X_test, y_test, X_augmented, y_augmented,
     metadata_file = os.path.join(output_dir, f"dataset_metadata_{timestamp}.json")
     with open(metadata_file, 'w', encoding='utf-8') as f:
         json.dump(metadata, f, indent=2, ensure_ascii=False)
-    print(f"数据集元数据已保存: {metadata_file}")
 
     return test_file, work_file, augmented_file
 
-
-# ==================== 创建模型保存目录结构 ====================
 def create_model_directories(base_dir="saved_models"):
-    """
-    创建模型保存的目录结构 [1,2,3](@ref)
-    """
-    # 使用pathlib创建目录（现代Python风格）[1,3](@ref)
+
     base_path = Path(base_dir)
 
-    # 定义子目录结构
     subdirs = [
         "XGBoost",
         "LightGBM",
@@ -156,39 +122,28 @@ def create_model_directories(base_dir="saved_models"):
         "training_logs"
     ]
 
-    # 创建主目录和所有子目录 [3](@ref)
     base_path.mkdir(parents=True, exist_ok=True)
     for subdir in subdirs:
         subdir_path = base_path / subdir
         subdir_path.mkdir(exist_ok=True)
-        print(f"创建目录: {subdir_path}")
 
     return base_path, subdirs
 
-
-# ==================== 保存训练好的模型 ====================
 def save_models(results, generator, scaler, label_encoder, base_dir="saved_models"):
-    """
-    保存所有训练好的模型到相应的子文件夹 [6,8](@ref)
-    """
+
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    # 创建目录结构
     base_path, subdirs = create_model_directories(base_dir)
 
     print(f"\n{'=' * 60}")
-    print("开始保存模型...")
     print(f"{'=' * 60}")
 
-    # 保存XGBoost模型 [8](@ref)
     if 'XGBoost' in results:
         xgb_dir = base_path / "XGBoost"
-        xgb_model = results['XGBoost']['model']  # 需要在results中包含模型对象
+        xgb_model = results['XGBoost']['model']
 
-        # 保存模型文件
         xgb_model.save_model(xgb_dir / f"xgb_model_{timestamp}.json")
 
-        # 保存模型元数据
         xgb_metadata = {
             "timestamp": timestamp,
             "model_type": "XGBoost",
@@ -200,17 +155,15 @@ def save_models(results, generator, scaler, label_encoder, base_dir="saved_model
         with open(xgb_dir / f"metadata_{timestamp}.json", 'w') as f:
             json.dump(xgb_metadata, f, indent=2)
 
-        print(f"✓ XGBoost模型已保存到: {xgb_dir}")
+        print(f"✓ XGBoost: {xgb_dir}")
 
-    # 保存LightGBM模型 [8](@ref)
     if 'LightGBM' in results:
         lgb_dir = base_path / "LightGBM"
         lgb_model = results['LightGBM']['model']
 
-        # 保存模型文件
+
         joblib.dump(lgb_model, lgb_dir / f"lgb_model_{timestamp}.joblib")
 
-        # 保存模型元数据
         lgb_metadata = {
             "timestamp": timestamp,
             "model_type": "LightGBM",
@@ -222,17 +175,14 @@ def save_models(results, generator, scaler, label_encoder, base_dir="saved_model
         with open(lgb_dir / f"metadata_{timestamp}.json", 'w') as f:
             json.dump(lgb_metadata, f, indent=2)
 
-        print(f"✓ LightGBM模型已保存到: {lgb_dir}")
+        print(f"✓ LightGBM: {lgb_dir}")
 
-    # 保存Random Forest模型 [8](@ref)
     if 'RandomForest' in results:
         rf_dir = base_path / "RandomForest"
         rf_model = results['RandomForest']['model']
 
-        # 保存模型文件
         joblib.dump(rf_model, rf_dir / f"rf_model_{timestamp}.joblib")
 
-        # 保存模型元数据
         rf_metadata = {
             "timestamp": timestamp,
             "model_type": "RandomForest",
@@ -244,19 +194,16 @@ def save_models(results, generator, scaler, label_encoder, base_dir="saved_model
         with open(rf_dir / f"metadata_{timestamp}.json", 'w') as f:
             json.dump(rf_metadata, f, indent=2)
 
-        print(f"✓ Random Forest模型已保存到: {rf_dir}")
+        print(f"✓ Random Forest: {rf_dir}")
 
-    # 保存GAN生成器模型 [1,8](@ref)
     if generator is not None:
         gan_dir = base_path / "GAN_Generator"
 
-        # 保存PyTorch模型 [1](@ref)
         torch.save({
             'generator_state_dict': generator.state_dict(),
             'timestamp': timestamp
         }, gan_dir / f"gan_generator_{timestamp}.pth")
 
-        # 保存scaler和元数据
         gan_metadata = {
             "timestamp": timestamp,
             "model_type": "GAN_Generator",
@@ -264,23 +211,19 @@ def save_models(results, generator, scaler, label_encoder, base_dir="saved_model
             "device": str(next(generator.parameters()).device) if generator is not None else "unknown"
         }
 
-        # 保存scaler
         if scaler is not None:
             joblib.dump(scaler, gan_dir / f"scaler_{timestamp}.joblib")
 
-        # 保存label encoder
         if label_encoder is not None:
             joblib.dump(label_encoder, gan_dir / f"label_encoder_{timestamp}.joblib")
 
         with open(gan_dir / f"metadata_{timestamp}.json", 'w') as f:
             json.dump(gan_metadata, f, indent=2)
 
-        print(f"✓ GAN生成器已保存到: {gan_dir}")
+        print(f"✓ GAN: {gan_dir}")
 
-    # 保存训练日志和总体结果 [1](@ref)
     logs_dir = base_path / "training_logs"
 
-    # 保存总体结果汇总
     summary = {
         "training_timestamp": timestamp,
         "models_saved": list(results.keys()) + (["GAN_Generator"] if generator is not None else []),
@@ -298,13 +241,12 @@ def save_models(results, generator, scaler, label_encoder, base_dir="saved_model
     with open(logs_dir / f"training_summary_{timestamp}.json", 'w') as f:
         json.dump(summary, f, indent=2)
 
-    print(f"✓ 训练日志已保存到: {logs_dir}")
+    print(f"✓ login: {logs_dir}")
 
-    print(f"\n所有模型已成功保存到: {base_path}")
+    print(f"\nall in: {base_path}")
     return base_path
 
 
-# ==================== GAN模型定义 ====================
 class Generator(nn.Module):
     def __init__(self, noise_dim, output_dim, hidden_dim=128):
         super(Generator, self).__init__()
@@ -345,44 +287,37 @@ class Discriminator(nn.Module):
         return self.model(x)
 
 
-# ==================== 平衡版CGAN训练（带早停机制）====================
 def train_cgan_balanced(X_train, y_train, n_classes, epochs=3000, batch_size=16, noise_dim=100,
                         patience=300, min_delta=0.001):
-    """
-    平衡判别器和生成器的CGAN训练，带早停机制
-    """
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    print(f"使用设备: {device}\n")
 
-    # 数据标准化
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print(f"device: {device}\n")
+
+
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X_train)
 
     feature_dim = X_scaled.shape[1]
 
-    # 初始化模型
+
     generator = Generator(noise_dim + n_classes, feature_dim, hidden_dim=256).to(device)
     discriminator = Discriminator(feature_dim + n_classes, hidden_dim=128).to(device)
 
-    # 优化器
     g_optimizer = optim.Adam(generator.parameters(), lr=0.0001, betas=(0.5, 0.999))
     d_optimizer = optim.Adam(discriminator.parameters(), lr=0.000025, betas=(0.5, 0.999))
 
     criterion = nn.BCELoss()
 
-    # 转换为tensor
+
     X_tensor = torch.FloatTensor(X_scaled).to(device)
     y_tensor = torch.LongTensor(y_train).to(device)
 
-    # 标签平滑和噪声
     real_label_range = (0.8, 1.0)
     fake_label_range = (0.0, 0.2)
 
-    print("开始训练平衡版CGAN (带早停机制)...")
     g_losses = []
     d_losses = []
 
-    # 早停相关变量
     best_loss = float('inf')
     best_epoch = 0
     patience_counter = 0
@@ -390,26 +325,23 @@ def train_cgan_balanced(X_train, y_train, n_classes, epochs=3000, batch_size=16,
     loss_history = []
 
     for epoch in range(epochs):
-        # 随机选择batch
+
         idx = np.random.randint(0, X_scaled.shape[0], min(batch_size, X_scaled.shape[0]))
         real_data = X_tensor[idx]
         real_labels = y_tensor[idx]
         current_batch_size = len(idx)
 
-        # One-hot编码标签
         real_labels_onehot = torch.zeros(current_batch_size, n_classes).to(device)
         real_labels_onehot.scatter_(1, real_labels.unsqueeze(1), 1)
 
-        # ========== 训练判别器 ==========
         d_optimizer.zero_grad()
 
-        # 真实数据
+
         real_label_value = torch.FloatTensor(current_batch_size, 1).uniform_(*real_label_range).to(device)
         real_input = torch.cat([real_data, real_labels_onehot], dim=1)
         real_output = discriminator(real_input)
         d_real_loss = criterion(real_output, real_label_value)
 
-        # 生成假数据
         noise = torch.randn(current_batch_size, noise_dim).to(device)
         fake_labels = torch.randint(0, n_classes, (current_batch_size,)).to(device)
         fake_labels_onehot = torch.zeros(current_batch_size, n_classes).to(device)
@@ -418,7 +350,6 @@ def train_cgan_balanced(X_train, y_train, n_classes, epochs=3000, batch_size=16,
         gen_input = torch.cat([noise, fake_labels_onehot], dim=1)
         fake_data = generator(gen_input)
 
-        # 假数据
         fake_label_value = torch.FloatTensor(current_batch_size, 1).uniform_(*fake_label_range).to(device)
         fake_input = torch.cat([fake_data.detach(), fake_labels_onehot], dim=1)
         fake_output = discriminator(fake_input)
@@ -429,7 +360,6 @@ def train_cgan_balanced(X_train, y_train, n_classes, epochs=3000, batch_size=16,
         torch.nn.utils.clip_grad_norm_(discriminator.parameters(), max_norm=1.0)
         d_optimizer.step()
 
-        # ========== 训练生成器 ==========
         for _ in range(2):
             g_optimizer.zero_grad()
 
@@ -451,7 +381,6 @@ def train_cgan_balanced(X_train, y_train, n_classes, epochs=3000, batch_size=16,
         g_losses.append(g_loss.item())
         d_losses.append(d_loss.item())
 
-        # ========== 早停机制 ==========
         if (epoch + 1) % 50 == 0:
             avg_g_loss = np.mean(g_losses[-50:])
             avg_d_loss = np.mean(d_losses[-50:])
@@ -464,14 +393,14 @@ def train_cgan_balanced(X_train, y_train, n_classes, epochs=3000, batch_size=16,
                 best_epoch = epoch + 1
                 patience_counter = 0
                 best_generator_state = generator.state_dict().copy()
-                print(f"Epoch [{epoch + 1}/{epochs}], D Loss: {avg_d_loss:.4f}, G Loss: {avg_g_loss:.4f} ✓ 改善")
+                print(f"Epoch [{epoch + 1}/{epochs}], D Loss: {avg_d_loss:.4f}, G Loss: {avg_g_loss:.4f} ✓ ")
             else:
                 patience_counter += 50
                 print(
-                    f"Epoch [{epoch + 1}/{epochs}], D Loss: {avg_d_loss:.4f}, G Loss: {avg_g_loss:.4f} (无改善: {patience_counter}/{patience})")
+                    f"Epoch [{epoch + 1}/{epochs}], D Loss: {avg_d_loss:.4f}, G Loss: {avg_g_loss:.4f} ( {patience_counter}/{patience})")
 
             if patience_counter >= patience:
-                print(f"\n早停触发! 最佳epoch: {best_epoch}, 最佳损失: {best_loss:.4f}")
+                print(f"\nbestepoch: {best_epoch}, loss: {best_loss:.4f}")
                 if best_generator_state is not None:
                     generator.load_state_dict(best_generator_state)
                 break
@@ -482,23 +411,20 @@ def train_cgan_balanced(X_train, y_train, n_classes, epochs=3000, batch_size=16,
             print(f"Epoch [{epoch + 1}/{epochs}], D Loss: {avg_d_loss:.4f}, G Loss: {avg_g_loss:.4f}")
 
     if patience_counter < patience:
-        print(f"CGAN训练完成! 完成所有{epochs}轮训练\n")
+        print(f"over\n")
     else:
-        print(f"CGAN训练完成! 在第{best_epoch}轮达到最佳性能\n")
+        print(f"over{best_epoch}epoch\n")
 
     return generator, scaler, device, noise_dim
 
-
-# ==================== 生成合成数据 ====================
 def generate_synthetic_data(generator, n_samples, n_classes, noise_dim, scaler, device, X_real):
-    """生成合成数据并应用严格的数值约束"""
+
     generator.eval()
 
     synthetic_X = []
     synthetic_y = []
     samples_per_class = n_samples // n_classes
 
-    # 计算真实数据的统计信息用于约束
     real_min = np.min(X_real, axis=0)
     real_max = np.max(X_real, axis=0)
     real_mean = np.mean(X_real, axis=0)
@@ -532,9 +458,8 @@ def generate_synthetic_data(generator, n_samples, n_classes, noise_dim, scaler, 
     return synthetic_X, synthetic_y
 
 
-# ==================== 验证生成质量 ====================
 def evaluate_generated_samples(generator, scaler, device, noise_dim, X_real, n_samples=1000):
-    """评估生成样本的质量并过滤异常值"""
+
     generator.eval()
 
     with torch.no_grad():
@@ -579,19 +504,11 @@ def evaluate_generated_samples(generator, scaler, device, noise_dim, X_real, n_s
         generated_samples = np.vstack(all_generated)
 
         validity_rate = valid_samples / total_attempts if total_attempts > 0 else 0
-        print(f"有效样本率: {validity_rate:.2%}")
-
-    print("生成样本统计：")
-    print(f"  均值: {generated_samples.mean(axis=0)}")
-    print(f"  标准差: {generated_samples.std(axis=0)}")
-    print(f"  范围: [{generated_samples.min():.2f}, {generated_samples.max():.2f}]")
-
     return generated_samples
 
 
-# ==================== 可视化对比 ====================
 def compare_distributions(real_data, generated_data, feature_idx=0):
-    """对比真实与生成数据的分布"""
+
     plt.figure(figsize=(12, 4))
 
     plt.subplot(1, 2, 1)
@@ -608,17 +525,14 @@ def compare_distributions(real_data, generated_data, feature_idx=0):
     plt.show()
 
 
-# ==================== 训练分类器 ====================
 def train_classifiers(X_train, y_train, X_test, y_test, n_features='auto'):
-    """训练XGBoost, LightGBM和Random Forest"""
+
     results = {}
 
     if n_features == 'auto':
         n_features = X_train.shape[1]
     else:
         n_features = min(n_features, X_train.shape[1])
-
-    print(f"使用特征数量: {n_features}/{X_train.shape[1]}\n")
 
     # ========== XGBoost ==========
     print("训练 XGBoost...")
