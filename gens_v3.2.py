@@ -547,7 +547,7 @@ def train_classifiers(X_train, y_train, X_test, y_test, n_features='auto'):
     xgb_pred = xgb_model.predict(X_test)
 
     results['XGBoost'] = {
-        'model': xgb_model,  # 保存模型对象
+        'model': xgb_model,
         'predictions': xgb_pred,
         'accuracy': accuracy_score(y_test, xgb_pred),
         'f1_macro': f1_score(y_test, xgb_pred, average='macro'),
@@ -571,7 +571,7 @@ def train_classifiers(X_train, y_train, X_test, y_test, n_features='auto'):
     lgb_pred = lgb_model.predict(X_test)
 
     results['LightGBM'] = {
-        'model': lgb_model,  # 保存模型对象
+        'model': lgb_model, 
         'predictions': lgb_pred,
         'accuracy': accuracy_score(y_test, lgb_pred),
         'f1_macro': f1_score(y_test, lgb_pred, average='macro'),
@@ -592,7 +592,7 @@ def train_classifiers(X_train, y_train, X_test, y_test, n_features='auto'):
     rf_pred = rf_model.predict(X_test)
 
     results['RandomForest'] = {
-        'model': rf_model,  # 保存模型对象
+        'model': rf_model,  
         'predictions': rf_pred,
         'accuracy': accuracy_score(y_test, rf_pred),
         'f1_macro': f1_score(y_test, rf_pred, average='macro'),
@@ -604,107 +604,89 @@ def train_classifiers(X_train, y_train, X_test, y_test, n_features='auto'):
     return results
 
 
-# ==================== 主函数 ====================
+# ==================== main ====================
 def main(csv_path, n_synthetic=10000, n_features=50, enable_visualization=True,
          patience=300, min_delta=0.001, output_dir="dataset_output", models_dir="saved_models"):
     """
     主流程
     """
     print("=" * 60)
-    print("GAN数据增强 + 多分类器系统 (带模型保存功能)")
     print("=" * 60 + "\n")
 
-    # 1. 加载数据
     X, y, label_encoder, feature_names = load_and_preprocess_data(csv_path)
 
-    # 2. 分割预测集
     X_work, X_test, y_work, y_test = train_test_split(
         X, y, test_size=26, random_state=42, stratify=y
     )
-    print(f"工作集大小: {X_work.shape[0]}")
-    print(f"预测集大小: {X_test.shape[0]}\n")
+    print(f"work_set: {X_work.shape[0]}")
+    print(f"eval_set {X_test.shape[0]}\n")
 
-    # 3. 训练CGAN（带早停）
     n_classes = len(np.unique(y))
     generator, scaler, device, noise_dim = train_cgan_balanced(
         X_work, y_work, n_classes, patience=patience, min_delta=min_delta
     )
 
-    # 4. 生成合成数据
     X_synthetic, y_synthetic = generate_synthetic_data(
         generator, n_synthetic, n_classes, noise_dim, scaler, device, X_work
     )
 
-    # 5. 验证生成质量
     print("=" * 60)
-    print("生成样本质量评估")
     print("=" * 60)
     generated_samples = evaluate_generated_samples(
         generator, scaler, device, noise_dim, X_work, n_samples=1000
     )
 
-    # 6. 可视化对比
     if enable_visualization and X_work.shape[1] >= 2:
-        print("\n生成数据与真实数据对比可视化:")
         compare_distributions(X_work, generated_samples)
 
-    # 7. 数据增强
     X_augmented = np.vstack([X_work, X_synthetic])
     y_augmented = np.hstack([y_work, y_synthetic])
 
-    print(f"最终训练集大小: {X_augmented.shape[0]} (真实: {X_work.shape[0]}, 合成: {X_synthetic.shape[0]})\n")
+    print(f"final: {X_augmented.shape[0]} (ture: {X_work.shape[0]}, syn: {X_synthetic.shape[0]})\n")
 
-    # 8. 保存数据集
     print("=" * 60)
-    print("保存数据集")
     print("=" * 60)
     test_file, work_file, augmented_file = save_datasets(
         X_work, y_work, X_test, y_test, X_augmented, y_augmented,
         label_encoder, feature_names, output_dir
     )
 
-    # 9. 训练分类器并评估
     print("\n" + "=" * 60)
-    print("分类器训练与评估")
     print("=" * 60 + "\n")
 
     results = train_classifiers(X_augmented, y_augmented, X_test, y_test, n_features)
 
-    # 10. 保存所有模型
     models_base_path = save_models(results, generator, scaler, label_encoder, models_dir)
 
-    # 11. 打印结果
     print("\n" + "=" * 60)
-    print("评估结果")
     print("=" * 60 + "\n")
 
     for model_name, metrics in results.items():
         print(f"\n{'=' * 40}")
         print(f"  {model_name}")
         print(f"{'=' * 40}")
-        print(f"准确率 (Accuracy):       {metrics['accuracy']:.4f}")
-        print(f"F1分数 (Macro):          {metrics['f1_macro']:.4f}")
-        print(f"F1分数 (Weighted):       {metrics['f1_weighted']:.4f}")
-        print(f"精确率 (Precision):      {metrics['precision']:.4f}")
-        print(f"召回率 (Recall):         {metrics['recall']:.4f}")
+        print(f" (Accuracy):       {metrics['accuracy']:.4f}")
+        print(f" (Macro):          {metrics['f1_macro']:.4f}")
+        print(f" (Weighted):       {metrics['f1_weighted']:.4f}")
+        print(f" (Precision):      {metrics['precision']:.4f}")
+        print(f" (Recall):         {metrics['recall']:.4f}")
 
-        print(f"\n详细分类报告:")
+        print(f"\ndetails:")
         print(classification_report(y_test, metrics['predictions'],
                                     target_names=label_encoder.classes_,
                                     zero_division=0))
 
-    # 找出最佳模型
     best_model = max(results.items(), key=lambda x: x[1]['f1_weighted'])
     print(f"\n{'=' * 60}")
-    print(f"最佳模型: {best_model[0]} (F1-Weighted: {best_model[1]['f1_weighted']:.4f})")
+    print(f"best models: {best_model[0]} (F1-Weighted: {best_model[1]['f1_weighted']:.4f})")
     print(f"{'=' * 60}\n")
 
     return results, generator, scaler, device, noise_dim, models_base_path
 
 
-# ==================== 运行 ====================
+# ==================== run ====================
 if __name__ == "__main__":
-    csv_path = "F:\mof_conduct\代码\GANS\特征选取\important_features_output.csv"
+    csv_path = "important_features_output.csv"
 
     results, generator, scaler, device, noise_dim, models_path = main(
         csv_path,
@@ -714,5 +696,5 @@ if __name__ == "__main__":
         patience=28,
         min_delta=0.001,
         output_dir="dataset_output/featurexiaorong",
-        models_dir="saved_models/featurexiaorong"  # 指定模型保存文件夹
+        models_dir="saved_models/featurexiaorong"  
     )
